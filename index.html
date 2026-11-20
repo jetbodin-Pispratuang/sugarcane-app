@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#166534">
+<title>Smart Sugarcane Farm</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script>
+  tailwind.config = { theme: { extend: { fontFamily: { sans: ['"Noto Sans Thai"', 'sans-serif'] } } } }
+</script>
+<style type="text/tailwindcss">
+  @layer components {
+    .card { @apply bg-white rounded-2xl shadow-sm border border-green-100 p-4; }
+    .inp  { @apply w-full border border-stone-300 rounded-xl px-3 py-3 text-base bg-white focus:outline-none focus:ring-2 focus:ring-green-500; }
+    .btn  { @apply rounded-xl font-bold px-4 py-3 text-base active:scale-95 transition select-none; }
+    .lbl  { @apply block text-sm font-semibold text-stone-600 mb-1; }
+  }
+</style>
+<style>
+  body { -webkit-tap-highlight-color: transparent; }
+  #map { height: 55vh; min-height: 320px; border-radius: 1rem; z-index: 0; }
+  .plot-label { background: rgba(0,0,0,.6); color: #fff; border: none; font-weight: 700; box-shadow: none; }
+  .plot-label:before { display: none; }
+  .tab-btn.active { color: #15803d; }
+  .tab-btn.active .ico { background: #dcfce7; }
+</style>
+</head>
+<body class="bg-stone-50 text-stone-800 font-sans pb-24">
+
+<!-- ===== Header ===== -->
+<header class="sticky top-0 z-[1100] bg-gradient-to-r from-green-800 to-green-600 text-white px-4 py-3 shadow-md">
+  <div class="max-w-2xl mx-auto flex items-center gap-3">
+    <div class="text-3xl">🌱</div>
+    <div class="leading-tight">
+      <h1 class="font-extrabold text-lg">Smart Sugarcane Farm</h1>
+      <p class="text-green-100 text-xs">ผู้ช่วยไร่อ้อยอัจฉริยะ</p>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-2xl mx-auto px-4 mt-4">
+
+<!-- ================= TAB 1: แผนที่ ================= -->
+<section id="tab-map" class="tab space-y-3">
+  <div class="relative">
+    <div id="map"></div>
+    <div id="areaBox" class="hidden absolute left-3 top-3 z-[1000] bg-white/95 rounded-xl shadow px-3 py-2 text-sm font-semibold"></div>
+  </div>
+
+  <div class="grid grid-cols-3 gap-2">
+    <button id="bLocate" class="btn bg-white border border-green-200 text-green-800">📍<br><span class="text-sm">ตำแหน่งฉัน</span></button>
+    <button id="bPin"    class="btn bg-white border border-green-200 text-green-800">📌<br><span class="text-sm">ปักหมุด</span></button>
+    <button id="bPoly"   class="btn bg-white border border-green-200 text-green-800">✏️<br><span class="text-sm">วาดแปลง</span></button>
+  </div>
+
+  <div id="polyTools" class="hidden grid grid-cols-3 gap-2">
+    <button id="bUndo"   class="btn bg-stone-200 text-stone-700">↩️ ย้อน</button>
+    <button id="bClear"  class="btn bg-red-100 text-red-700">🗑️ ล้าง</button>
+    <button id="bFinish" class="btn bg-green-600 text-white">✅ เสร็จสิ้น</button>
+  </div>
+
+  <p id="modeHint" class="text-sm text-stone-500 text-center">เลือก "วาดแปลง" แล้วแตะบนแผนที่ตามมุมของแปลงอ้อย</p>
+
+  <div class="card">
+    <label class="lbl" for="plotName">ชื่อแปลง / ชื่อหมุด (ไม่บังคับ)</label>
+    <input id="plotName" class="inp" placeholder="เช่น แปลงหลังบ้าน">
+  </div>
+
+  <div class="card">
+    <div class="flex justify-between items-center mb-2">
+      <h2 class="font-bold text-lg">🌾 แปลงของฉัน</h2>
+      <span id="totalRai" class="bg-green-100 text-green-800 font-bold text-sm rounded-full px-3 py-1"></span>
+    </div>
+    <div id="plotList" class="space-y-2"></div>
+  </div>
+
+  <div class="card">
+    <h2 class="font-bold text-lg mb-2">📌 หมุดที่ปักไว้</h2>
+    <div id="pinList" class="space-y-2"></div>
+  </div>
+</section>
+
+<!-- ================= TAB 2: อากาศ & คำแนะนำ ================= -->
+<section id="tab-wx" class="tab hidden space-y-3">
+  <div class="card bg-gradient-to-br from-sky-50 to-white">
+    <div class="flex justify-between items-center mb-2">
+      <h2 class="font-bold text-lg">⛅ สภาพอากาศวันนี้</h2>
+      <span id="wxPlace" class="text-xs text-stone-500"></span>
+    </div>
+    <div id="wxNow" class="text-stone-500">กำลังโหลด...</div>
+    <div class="grid grid-cols-2 gap-2 mt-3">
+      <button id="bGps" class="btn bg-white border border-green-200 text-green-800 text-sm">📍 ใช้ GPS</button>
+      <button id="bMapCenter" class="btn bg-white border border-green-200 text-green-800 text-sm">🗺️ ใช้กลางแผนที่</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 class="font-bold text-lg mb-2">📅 พยากรณ์ 3 วัน</h2>
+    <div id="wxDays" class="grid grid-cols-3 gap-2 text-center"></div>
+  </div>
+
+  <div class="card">
+    <h2 class="font-bold text-lg mb-1">💡 คำแนะนำอัจฉริยะ</h2>
+    <p class="text-xs text-stone-500 mb-3">วิเคราะห์จากข้อมูลอากาศและช่วงฤดูกาล</p>
+    <div id="advice" class="space-y-2"></div>
+  </div>
+</section>
+
+<!-- ================= TAB 3: ปุ๋ย & เช็กลิสต์ ================= -->
+<section id="tab-fert" class="tab hidden space-y-3">
+  <div class="card space-y-3">
+    <h2 class="font-bold text-lg">🧪 คำนวณปุ๋ย</h2>
+    <div>
+      <label class="lbl">เลือกแปลงจากแผนที่</label>
+      <select id="fPlot" class="inp"></select>
+    </div>
+    <div>
+      <label class="lbl">จำนวนไร่</label>
+      <input id="fRai" type="number" step="0.01" min="0" value="10" class="inp">
+    </div>
+    <div>
+      <label class="lbl">ช่วงการใส่ปุ๋ย</label>
+      <select id="fStage" class="inp">
+        <option value="plant">อ้อยปลูก – รองพื้นตอนปลูก</option>
+        <option value="top1">อ้อยปลูก – แต่งหน้า (อายุ 3–4 เดือน)</option>
+        <option value="ratoon">อ้อยตอ – ใส่หลังตัด/ต้นฤดูฝน</option>
+        <option value="custom">กำหนดเอง</option>
+      </select>
+    </div>
+    <div class="grid grid-cols-2 gap-2">
+      <div><label class="lbl">สูตรปุ๋ย (N-P-K)</label><input id="fFormula" class="inp" value="15-15-15"></div>
+      <div><label class="lbl">อัตรา (กก./ไร่)</label><input id="fRate" type="number" min="0" value="50" class="inp"></div>
+      <div><label class="lbl">ขนาดกระสอบ (กก.)</label><input id="fBag" type="number" min="1" value="50" class="inp"></div>
+      <div><label class="lbl">ราคา/กระสอบ (บาท)</label><input id="fPrice" type="number" min="0" value="1000" class="inp"></div>
+    </div>
+
+    <div id="fResult" class="rounded-xl bg-green-50 border border-green-200 p-4"></div>
+    <button id="bFertCost" class="btn w-full bg-green-600 text-white">➕ บันทึกค่าปุ๋ยลงต้นทุน</button>
+    <p class="text-xs text-stone-500">* อัตราที่ใส่ให้เป็นค่าเริ่มต้นโดยประมาณ ปรับแก้ได้ ควรปรึกษาเจ้าหน้าที่ส่งเสริมอ้อยของโรงงานหรือใช้ผลวิเคราะห์ดินประกอบ</p>
+  </div>
+
+  <div class="card space-y-3">
+    <div class="flex justify-between items-center">
+      <h2 class="font-bold text-lg">✅ เช็กลิสต์ตัดอ้อยสด ไว้ใบคลุมดิน</h2>
+      <span id="chkCount" class="bg-green-100 text-green-800 font-bold text-sm rounded-full px-3 py-1"></span>
+    </div>
+    <div id="chkList" class="space-y-2"></div>
+    <div>
+      <label class="lbl">พื้นที่ที่ตัดวันนี้ (ไร่)</label>
+      <input id="cutRai" type="number" step="0.1" min="0" class="inp" placeholder="เช่น 3">
+    </div>
+    <button id="bSaveCut" class="btn w-full bg-green-700 text-white">💾 บันทึกกิจกรรมวันนี้</button>
+    <div id="cutLogs" class="space-y-2"></div>
+  </div>
+</section>
+
+<!-- ================= TAB 4: ต้นทุน & โควตา ================= -->
+<section id="tab-cost" class="tab hidden space-y-3">
+  <div class="card">
+    <h2 class="font-bold text-lg mb-3">🚚 โควตาส่งโรงงาน</h2>
+    <div class="flex items-center gap-4">
+      <svg viewBox="0 0 120 120" class="w-32 h-32 shrink-0">
+        <circle cx="60" cy="60" r="52" fill="none" stroke="#e7e5e4" stroke-width="12"/>
+        <circle id="ring" cx="60" cy="60" r="52" fill="none" stroke="#16a34a" stroke-width="12" stroke-linecap="round"
+                stroke-dasharray="326.7" stroke-dashoffset="326.7" transform="rotate(-90 60 60)" style="transition:stroke-dashoffset .6s"/>
+        <text id="ringTxt" x="60" y="68" text-anchor="middle" font-size="24" font-weight="800" fill="#166534">0%</text>
+      </svg>
+      <div class="flex-1 text-sm">
+        <p class="text-stone-500">ส่งแล้ว</p>
+        <p class="text-2xl font-extrabold text-green-800"><span id="qDone">0</span> <span class="text-base font-semibold text-stone-500">ตัน</span></p>
+        <p class="text-stone-500">เป้าหมาย <span id="qTargetTxt" class="font-bold text-stone-700"></span> ตัน</p>
+        <p id="qRemain" class="font-semibold text-amber-700 mt-1"></p>
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-2 mt-4">
+      <div><label class="lbl">โควตาเป้าหมาย (ตัน)</label><input id="qTarget" type="number" min="0" class="inp"></div>
+      <div><label class="lbl">ราคาอ้อย (บาท/ตัน)</label><input id="qPrice" type="number" min="0" class="inp"></div>
+    </div>
+    <p class="text-xs text-stone-500 mt-1">* ใส่ราคาตามที่โรงงานประกาศจริงเพื่อให้ประมาณรายได้แม่นยำ</p>
+
+    <div class="mt-4 border-t pt-3 space-y-2">
+      <h3 class="font-bold">บันทึกการส่งอ้อย</h3>
+      <div class="grid grid-cols-2 gap-2">
+        <input id="dDate" type="date" class="inp">
+        <input id="dTons" type="number" step="0.01" min="0" placeholder="น้ำหนัก (ตัน)" class="inp">
+      </div>
+      <input id="dTicket" class="inp" placeholder="เลขที่ใบชั่ง (ไม่บังคับ)">
+      <button id="bAddDel" class="btn w-full bg-green-700 text-white">➕ เพิ่มรายการส่งอ้อย</button>
+      <div id="delList" class="space-y-2 pt-1"></div>
+    </div>
+  </div>
+
+  <div class="card space-y-3">
+    <h2 class="font-bold text-lg">💰 บันทึกต้นทุน</h2>
+    <div id="catGrid" class="grid grid-cols-2 gap-2"></div>
+    <div class="grid grid-cols-2 gap-2">
+      <input id="cDate" type="date" class="inp">
+      <input id="cAmt" type="number" min="0" placeholder="จำนวนเงิน (บาท)" class="inp">
+    </div>
+    <input id="cNote" class="inp" placeholder="รายละเอียด (ไม่บังคับ)">
+    <button id="bAddCost" class="btn w-full bg-amber-700 text-white">➕ บันทึกค่าใช้จ่าย</button>
+  </div>
+
+  <div class="card">
+    <h2 class="font-bold text-lg mb-2">📊 สรุปต้นทุน</h2>
+    <div class="grid grid-cols-2 gap-2 mb-3 text-center">
+      <div class="bg-amber-50 rounded-xl p-3"><p class="text-xs text-stone-500">ต้นทุนรวม</p><p id="sTotal" class="text-xl font-extrabold text-amber-800"></p></div>
+      <div class="bg-green-50 rounded-xl p-3"><p class="text-xs text-stone-500">ต้นทุนต่อไร่</p><p id="sPerRai" class="text-xl font-extrabold text-green-800"></p></div>
+      <div class="bg-sky-50 rounded-xl p-3"><p class="text-xs text-stone-500">รายได้ประมาณ</p><p id="sRev" class="text-xl font-extrabold text-sky-800"></p></div>
+      <div class="rounded-xl p-3" id="sProfitBox"><p class="text-xs text-stone-500">กำไรเบื้องต้น</p><p id="sProfit" class="text-xl font-extrabold"></p></div>
+    </div>
+    <div id="costBars" class="space-y-3"></div>
+    <h3 class="font-bold mt-4 mb-2">รายการล่าสุด</h3>
+    <div id="costList" class="space-y-2"></div>
+  </div>
+</section>
+
+</main>
+
+<!-- ===== Bottom Nav ===== -->
+<nav class="fixed bottom-0 inset-x-0 z-[1200] bg-white border-t border-stone-200 shadow-[0_-4px_12px_rgba(0,0,0,.06)]" style="padding-bottom:env(safe-area-inset-bottom)">
+  <div class="max-w-2xl mx-auto grid grid-cols-4">
+    <button class="tab-btn text-stone-500 py-2 flex flex-col items-center text-xs font-semibold" data-t="map"><span class="ico text-2xl rounded-full px-4">🗺️</span>แผนที่</button>
+    <button class="tab-btn text-stone-500 py-2 flex flex-col items-center text-xs font-semibold" data-t="wx"><span class="ico text-2xl rounded-full px-4">⛅</span>อากาศ</button>
+    <button class="tab-btn text-stone-500 py-2 flex flex-col items-center text-xs font-semibold" data-t="fert"><span class="ico text-2xl rounded-full px-4">🧪</span>ปุ๋ย</button>
+    <button class="tab-btn text-stone-500 py-2 flex flex-col items-center text-xs font-semibold" data-t="cost"><span class="ico text-2xl rounded-full px-4">💰</span>ต้นทุน</button>
+  </div>
+</nav>
+
+<div id="toast" class="fixed left-1/2 -translate-x-1/2 bottom-28 z-[1300] bg-stone-800 text-white text-sm rounded-full px-4 py-2 opacity-0 pointer-events-none transition-opacity"></div>
+
+<script>
+/* ============ ข้อมูลและฟังก์ชันพื้นฐาน ============ */
+const KEY = 'smartCane_v1';
+const def = { plots: [], pins: [], costs: [], deliveries: [], quota: { target: 500, price: 1000 }, check: {}, cutLogs: [] };
+let S;
+try { S = Object.assign(structuredClone(def), JSON.parse(localStorage.getItem(KEY) || '{}')); }
+catch (e) { S = structuredClone(def); }
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} };
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = (n, d = 1) => Number(n).toLocaleString('th-TH', { maximumFractionDigits: d });
+const baht = n => '฿' + Number(n).toLocaleString('th-TH', { maximumFractionDigits: 0 });
+const thDate = d => new Date(d).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' });
+const todayStr = () => new Date().toISOString().slice(0, 10);
+const uid = () => Date.now() + Math.floor(Math.random() * 1000);
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.style.opacity = 1;
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.style.opacity = 0, 2200);
+}
+
+/* ============ แท็บ ============ */
+function showTab(n) {
+  document.querySelectorAll('.tab').forEach(s => s.classList.toggle('hidden', s.id !== 'tab-' + n));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.t === n));
+  if (n === 'map') setTimeout(() => map.invalidateSize(), 100);
+  window.scrollTo({ top: 0 });
+}
+document.querySelectorAll('.tab-btn').forEach(b => b.onclick = () => showTab(b.dataset.t));
+
+/* ============ 1) แผนที่ ============ */
+const map = L.map('map').setView([15.2, 101.0], 6);
+const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  { maxZoom: 19, maxNativeZoom: 18, attribution: 'Tiles © Esri' });
+const places = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+  { maxZoom: 19, maxNativeZoom: 18 });
+const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' });
+sat.addTo(map); places.addTo(map);
+L.control.layers({ '🛰️ ดาวเทียม': sat, '🗺️ แผนที่ถนน': osm }, { 'ชื่อสถานที่': places }, { position: 'topright' }).addTo(map);
+
+const savedGroup = L.featureGroup().addTo(map);
+const draftGroup = L.featureGroup().addTo(map);
+const meGroup = L.featureGroup().addTo(map);
+const pinIcon = L.divIcon({ html: '<div style="font-size:30px;line-height:30px">📍</div>', className: '', iconSize: [30, 30], iconAnchor: [15, 28] });
+
+let mode = 'none', draft = [];
+
+// พื้นที่บนผิวโลก (ตารางเมตร)
+function areaM2(pts) {
+  const R = 6378137, rad = x => x * Math.PI / 180;
+  let t = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    t += rad(b[1] - a[1]) * (2 + Math.sin(rad(a[0])) + Math.sin(rad(b[0])));
+  }
+  return Math.abs(t * R * R / 2);
+}
+function raiText(m2) {
+  const sqw = m2 / 4;
+  const rai = Math.floor(sqw / 400), ngan = Math.floor((sqw % 400) / 100), wa = Math.floor(sqw % 100);
+  return `${rai} ไร่ ${ngan} งาน ${wa} ตร.ว.`;
+}
+
+function setMode(m) {
+  mode = (mode === m) ? 'none' : m;
+  [['bPin', 'pin'], ['bPoly', 'poly']].forEach(([id, k]) => {
+    const on = mode === k;
+    $(id).classList.toggle('bg-green-600', on); $(id).classList.toggle('text-white', on);
+    $(id).classList.toggle('bg-white', !on); $(id).classList.toggle('text-green-800', !on);
+  });
+  $('polyTools').classList.toggle('hidden', mode !== 'poly');
+  $('modeHint').textContent = mode === 'pin' ? 'แตะบนแผนที่เพื่อปักหมุด'
+    : mode === 'poly' ? 'แตะบนแผนที่ตามมุมแปลงอ้อย แล้วกด "เสร็จสิ้น"'
+    : 'เลือก "วาดแปลง" แล้วแตะบนแผนที่ตามมุมของแปลงอ้อย';
+  if (mode !== 'poly') { draft = []; updateDraft(); }
+}
+
+function updateDraft() {
+  draftGroup.clearLayers();
+  if (draft.length >= 2)
+    L.polygon(draft, { color: '#fde047', weight: 3, dashArray: '6 6', fillColor: '#fde047', fillOpacity: .25, interactive: false }).addTo(draftGroup);
+  draft.forEach(p => L.circleMarker(p, { radius: 7, color: '#fff', weight: 2, fillColor: '#eab308', fillOpacity: 1, interactive: false }).addTo(draftGroup));
+  const box = $('areaBox');
+  if (draft.length >= 3) {
+    const m2 = areaM2(draft);
+    box.innerHTML = `📐 <span class="text-green-700">${fmt(m2 / 1600, 2)} ไร่</span><br><span class="text-xs text-stone-500">${raiText(m2)} • ${fmt(m2, 0)} ตร.ม.</span>`;
+    box.classList.remove('hidden');
+  } else if (draft.length > 0) {
+    box.textContent = `ปักแล้ว ${draft.length} จุด (ต้องมีอย่างน้อย 3 จุด)`;
+    box.classList.remove('hidden');
+  } else box.classList.add('hidden');
+}
+
+map.on('click', e => {
+  if (mode === 'poly') { draft.push([e.latlng.lat, e.latlng.lng]); updateDraft(); }
+  else if (mode === 'pin') {
+    const name = $('plotName').value.trim() || `หมุด ${S.pins.length + 1}`;
+    S.pins.push({ id: uid(), name, lat: e.latlng.lat, lng: e.latlng.lng });
+    $('plotName').value = ''; save(); drawSaved(); renderMapLists(); toast('ปักหมุดแล้ว 📌');
+  }
+});
+
+$('bPin').onclick = () => setMode('pin');
+$('bPoly').onclick = () => setMode('poly');
+$('bUndo').onclick = () => { draft.pop(); updateDraft(); };
+$('bClear').onclick = () => { draft = []; updateDraft(); };
+$('bFinish').onclick = () => {
+  if (draft.length < 3) return toast('ต้องปักอย่างน้อย 3 จุด');
+  const m2 = areaM2(draft);
+  const name = $('plotName').value.trim() || `แปลง ${S.plots.length + 1}`;
+  S.plots.push({ id: uid(), name, rai: m2 / 1600, pts: draft.slice() });
+  $('plotName').value = ''; save();
+  setMode('none'); drawSaved(); renderMapLists(); refreshPlotSelect(); renderCosts();
+  toast(`บันทึก "${name}" ${fmt(m2 / 1600, 2)} ไร่ ✅`);
+};
+
+// ตำแหน่งปัจจุบัน
+let locOpts = { setView: true, maxZoom: 17 };
+function locate(setView) {
+  locOpts = setView ? { setView: true, maxZoom: 17 } : { setView: false };
+  map.locate(Object.assign({ enableHighAccuracy: true, timeout: 10000 }, locOpts));
+}
+map.on('locationfound', e => {
+  meGroup.clearLayers();
+  L.circleMarker(e.latlng, { radius: 8, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(meGroup);
+  L.circle(e.latlng, { radius: e.accuracy, color: '#2563eb', weight: 1, fillOpacity: .1 }).addTo(meGroup);
+  wxLoc = { lat: e.latlng.lat, lon: e.latlng.lng, name: 'ตำแหน่งของคุณ' };
+  loadWeather();
+});
+map.on('locationerror', () => toast('ไม่สามารถระบุตำแหน่งได้ (ตรวจสอบการอนุญาตตำแหน่ง)'));
+$('bLocate').onclick = () => locate(true);
+
+function drawSaved() {
+  savedGroup.clearLayers();
+  S.plots.forEach(p => {
+    L.polygon(p.pts, { color: '#4ade80', weight: 3, fillColor: '#22c55e', fillOpacity: .3 })
+      .bindTooltip(`${esc(p.name)} • ${fmt(p.rai, 2)} ไร่`, { permanent: true, direction: 'center', className: 'plot-label' })
+      .addTo(savedGroup);
+  });
+  S.pins.forEach(p => L.marker([p.lat, p.lng], { icon: pinIcon }).bindPopup(`<b>${esc(p.name)}</b>`).addTo(savedGroup));
+}
+const totalRai = () => S.plots.reduce((a, p) => a + p.rai, 0);
+function renderMapLists() {
+  $('totalRai').textContent = `รวม ${fmt(totalRai(), 2)} ไร่`;
+  $('plotList').innerHTML = S.plots.length ? S.plots.map(p => `
+    <div class="flex items-center gap-2 bg-green-50 rounded-xl p-3">
+      <div class="flex-1"><p class="font-bold">${esc(p.name)}</p>
+      <p class="text-sm text-stone-500">${fmt(p.rai, 2)} ไร่ (${raiText(p.rai * 1600)})</p></div>
+      <button class="text-2xl p-1" onclick="zoomPlot(${p.id})">🔍</button>
+      <button class="text-2xl p-1" onclick="delPlot(${p.id})">🗑️</button>
+    </div>`).join('') : '<p class="text-stone-400 text-center py-3">ยังไม่มีแปลง — กด ✏️ วาดแปลง เพื่อเริ่มต้น</p>';
+  $('pinList').innerHTML = S.pins.length ? S.pins.map(p => `
+    <div class="flex items-center gap-2 bg-stone-50 rounded-xl p-3">
+      <p class="flex-1 font-semibold">📍 ${esc(p.name)}</p>
+      <button class="text-2xl p-1" onclick="zoomPin(${p.id})">🔍</button>
+      <button class="text-2xl p-1" onclick="delPin(${p.id})">🗑️</button>
+    </div>`).join('') : '<p class="text-stone-400 text-center py-3">ยังไม่มีหมุด</p>';
+}
+function zoomPlot(id) { const p = S.plots.find(x => x.id === id); if (p) { window.scrollTo({ top: 0 }); map.fitBounds(L.polygon(p.pts).getBounds(), { padding: [30, 30] }); } }
+function zoomPin(id) { const p = S.pins.find(x => x.id === id); if (p) { window.scrollTo({ top: 0 }); map.setView([p.lat, p.lng], 17); } }
+function delPlot(id) { if (!confirm('ลบแปลงนี้?')) return; S.plots = S.plots.filter(p => p.id !== id); save(); drawSaved(); renderMapLists(); refreshPlotSelect(); renderCosts(); }
+function delPin(id) { if (!confirm('ลบหมุดนี้?')) return; S.pins = S.pins.filter(p => p.id !== id); save(); drawSaved(); renderMapLists(); }
+
+/* ============ 2) อากาศ & คำแนะนำ ============ */
+let wxLoc = { lat: 16.44, lon: 102.83, name: 'ขอนแก่น (ค่าเริ่มต้น)' };
+const wmo = c => c === 0 ? ['☀️', 'ท้องฟ้าแจ่มใส'] : c <= 2 ? ['🌤️', 'มีเมฆบางส่วน'] : c === 3 ? ['☁️', 'เมฆมาก']
+  : c <= 48 ? ['🌫️', 'มีหมอก'] : c <= 57 ? ['🌦️', 'ฝนปรอย'] : c <= 67 ? ['🌧️', 'ฝนตก']
+  : c <= 82 ? ['🌧️', 'ฝนซู่'] : ['⛈️', 'พายุฝนฟ้าคะนอง'];
+
+async function loadWeather() {
+  $('wxPlace').textContent = wxLoc.name;
+  try {
+    const u = `https://api.open-meteo.com/v1/forecast?latitude=${wxLoc.lat}&longitude=${wxLoc.lon}` +
+      `&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,precipitation` +
+      `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum` +
+      `&timezone=auto&forecast_days=3`;
+    const d = await (await fetch(u)).json();
+    const c = d.current, dy = d.daily;
+    const [ic, tx] = wmo(c.weather_code);
+    $('wxNow').innerHTML = `
+      <div class="flex items-center gap-4">
+        <div class="text-6xl">${ic}</div>
+        <div><p class="text-4xl font-extrabold text-stone-800">${Math.round(c.temperature_2m)}°C</p>
+        <p class="font-semibold text-stone-600">${tx}</p></div>
+      </div>
+      <div class="grid grid-cols-3 gap-2 mt-3 text-center text-sm font-semibold">
+        <div class="bg-white rounded-xl p-2">💧<br>ฝน ${dy.precipitation_probability_max[0] ?? 0}%</div>
+        <div class="bg-white rounded-xl p-2">💦<br>ชื้น ${c.relative_humidity_2m}%</div>
+        <div class="bg-white rounded-xl p-2">💨<br>${Math.round(c.wind_speed_10m)} กม./ชม.</div>
+      </div>`;
+    $('wxDays').innerHTML = dy.time.map((t, i) => {
+      const [i2] = wmo(dy.weather_code[i]);
+      const name = i === 0 ? 'วันนี้' : new Date(t).toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric' });
+      return `<div class="bg-green-50 rounded-xl p-2"><p class="text-xs font-bold text-stone-600">${name}</p>
+        <p class="text-3xl my-1">${i2}</p>
+        <p class="text-sm font-bold">${Math.round(dy.temperature_2m_max[i])}° <span class="text-stone-400 font-normal">${Math.round(dy.temperature_2m_min[i])}°</span></p>
+        <p class="text-xs text-sky-700">💧${dy.precipitation_probability_max[i] ?? 0}%</p></div>`;
+    }).join('');
+    renderAdvice({
+      temp: c.temperature_2m, hum: c.relative_humidity_2m, wind: c.wind_speed_10m,
+      rain0: dy.precipitation_probability_max[0] ?? 0, sum0: dy.precipitation_sum[0] ?? 0,
+      rain1: dy.precipitation_probability_max[1] ?? 0, tmax: dy.temperature_2m_max[0]
+    });
+  } catch (e) {
+    $('wxNow').textContent = 'โหลดสภาพอากาศไม่ได้ กรุณาตรวจสอบอินเทอร์เน็ต';
+    $('advice').innerHTML = '<p class="text-stone-400">ไม่มีข้อมูลสำหรับวิเคราะห์</p>';
+  }
+}
+function renderAdvice(w) {
+  const A = [];
+  const add = (icon, title, text, tone) => A.push({ icon, title, text, tone });
+  if (w.rain0 >= 70 || w.sum0 >= 10)
+    add('🌧️', 'เลื่อนการใส่ปุ๋ยและฉีดพ่น', 'ฝนมีโอกาสตกสูง ปุ๋ยและสารเคมีอาจถูกชะล้าง ควรรอให้ฝนซา และตรวจร่องระบายน้ำในแปลง', 'red');
+  else if (w.rain0 >= 30 || w.rain1 >= 50)
+    add('🌱', 'เหมาะกับการใส่ปุ๋ยแต่งหน้า', 'ดินมีความชื้นพอเหมาะ ฝนเล็กน้อยช่วยให้ปุ๋ยละลายและซึมลงราก ควรใส่ช่วงเช้าหรือเย็น', 'green');
+  else if (w.tmax >= 34)
+    add('🍂', 'ควรรักษาความชื้นด้วยใบอ้อยคลุมดิน', 'อากาศร้อนและแห้ง ใบอ้อยคลุมดินช่วยลดการระเหยของน้ำ ควรเลี่ยงใส่ปุ๋ยเคมีตอนแดดจัด', 'amber');
+  else
+    add('🍂', 'ฝนน้อย ควรเก็บความชื้นในดิน', 'ใช้ใบอ้อยคลุมดินเพื่อรักษาความชื้น และวางแผนให้น้ำหากแล้งต่อเนื่อง', 'amber');
+  if (w.wind >= 20) add('💨', 'ลมค่อนข้างแรง', 'ควรเลี่ยงการฉีดพ่นสารเคมี เพราะละอองอาจปลิวไปนอกเป้าหมาย', 'red');
+  if (w.hum >= 85) add('🦠', 'ความชื้นสูง', 'เฝ้าระวังโรคและแมลงในอ้อย ตรวจแปลงสม่ำเสมอ', 'amber');
+  if (w.temp >= 36) add('🥵', 'อากาศร้อนจัด', 'พักช่วงเที่ยง ดื่มน้ำให้เพียงพอ และทำงานช่วงเช้าหรือเย็น', 'red');
+  const m = new Date().getMonth() + 1;
+  if (m >= 11 || m <= 4)
+    add('🌾', 'ฤดูเก็บเกี่ยว', 'แนะนำตัดอ้อยสดและไว้ใบคลุมดิน ไม่เผา ช่วยเพิ่มอินทรียวัตถุ รักษาความชื้น และลดฝุ่น PM2.5', 'green');
+  else if (m >= 5 && m <= 7)
+    add('🌧️', 'ช่วงต้นฤดูฝน', 'เหมาะกับการใส่ปุ๋ยอ้อยตอและอ้อยปลูกใหม่ เมื่อดินมีความชื้นสม่ำเสมอ', 'green');
+  else
+    add('🌿', 'ช่วงอ้อยเจริญเติบโต', 'กำจัดวัชพืชและดูแลแปลงให้โปร่ง ตรวจโรคแมลงอย่างสม่ำเสมอ', 'green');
+  const tone = { green: 'bg-green-50 border-green-200', amber: 'bg-amber-50 border-amber-200', red: 'bg-red-50 border-red-200' };
+  $('advice').innerHTML = A.map(a => `
+    <div class="flex gap-3 border rounded-xl p-3 ${tone[a.tone]}">
+      <div class="text-3xl">${a.icon}</div>
+      <div><p class="font-bold">${a.title}</p><p class="text-sm text-stone-600">${a.text}</p></div>
+    </div>`).join('');
+}
+$('bGps').onclick = () => { locate(false); toast('กำลังหาตำแหน่ง...'); };
+$('bMapCenter').onclick = () => {
+  const c = map.getCenter();
+  wxLoc = { lat: c.lat, lon: c.lng, name: 'กลางแผนที่' };
+  loadWeather();
+};
+
+/* ============ 3) ปุ๋ย & เช็กลิสต์ ============ */
+const PRESETS = {
+  plant:  { f: '15-15-15', r: 50 },
+  top1:   { f: '21-0-0',   r: 50 },
+  ratoon: { f: '25-7-7',   r: 75 }
+};
+function refreshPlotSelect() {
+  const sel = $('fPlot'), cur = sel.value;
+  sel.innerHTML = '<option value="">— กรอกจำนวนไร่เอง —</option>' +
+    (S.plots.length ? `<option value="all">แปลงทั้งหมด (${fmt(totalRai(), 2)} ไร่)</option>` : '') +
+    S.plots.map(p => `<option value="${p.id}">${esc(p.name)} (${fmt(p.rai, 2)} ไร่)</option>`).join('');
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+}
+$('fPlot').onchange = () => {
+  const v = $('fPlot').value;
+  if (v === 'all') $('fRai').value = totalRai().toFixed(2);
+  else if (v) $('fRai').value = S.plots.find(p => p.id == v).rai.toFixed(2);
+  calcFert();
+};
+$('fStage').onchange = () => {
+  const p = PRESETS[$('fStage').value];
+  if (p) { $('fFormula').value = p.f; $('fRate').value = p.r; }
+  calcFert();
+};
+let lastFert = null;
+function calcFert() {
+  const rai = +$('fRai').value || 0, rate = +$('fRate').value || 0;
+  const bag = +$('fBag').value || 50, price = +$('fPrice').value || 0;
+  const formula = $('fFormula').value.trim();
+  const kg = rai * rate, bags = Math.ceil(kg / bag), left = bags * bag - kg;
+  let nutri = '';
+  const m = formula.match(/^(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/);
+  if (m) {
+    const [n, p, k] = [m[1], m[2], m[3]].map(x => kg * x / 100);
+    nutri = `<p class="text-sm text-stone-600 mt-2">ธาตุอาหารรวม: N ${fmt(n)} กก. • P₂O₅ ${fmt(p)} กก. • K₂O ${fmt(k)} กก.</p>`;
+  }
+  lastFert = { rai, formula, bags, cost: bags * price };
+  $('fResult').innerHTML = `
+    <p class="text-sm text-stone-500">ต้องใช้ปุ๋ยสูตร <b>${esc(formula)}</b> รวม</p>
+    <p class="text-3xl font-extrabold text-green-800">${fmt(kg)} กก.</p>
+    <p class="text-xl font-bold text-stone-700 mt-1">≈ ${fmt(bags, 0)} กระสอบ <span class="text-sm font-normal text-stone-500">(กระสอบละ ${fmt(bag, 0)} กก. เหลือเศษ ${fmt(left)} กก.)</span></p>
+    <p class="mt-1 font-semibold text-amber-800">ค่าปุ๋ยประมาณ ${baht(bags * price)}</p>${nutri}`;
+}
+['fRai', 'fRate', 'fBag', 'fPrice', 'fFormula'].forEach(id => $(id).oninput = calcFert);
+$('bFertCost').onclick = () => {
+  if (!lastFert || lastFert.cost <= 0) return toast('กรุณากรอกข้อมูลปุ๋ยให้ครบ');
+  S.costs.unshift({ id: uid(), date: todayStr(), cat: 'ค่าปุ๋ย', amt: lastFert.cost,
+    note: `ปุ๋ย ${lastFert.formula} ${fmt(lastFert.rai, 2)} ไร่ ${lastFert.bags} กระสอบ` });
+  save(); renderCosts(); toast('บันทึกลงต้นทุนแล้ว ✅');
+};
+
+const CHECK = [
+  'ตัดอ้อยสด ไม่เผาแปลง',
+  'ตัดชิดดิน เพื่อให้ตออ้อยงอกดี',
+  'กระจายใบอ้อยคลุมดินให้ทั่วแปลง',
+  'ไม่เผาเศษใบอ้อยที่เหลือ',
+  'ใส่ปุ๋ยหลังตัดเมื่อดินมีความชื้น',
+  'ตรวจโรคและแมลงหลังตัด'
+];
+function renderCheck() {
+  $('chkList').innerHTML = CHECK.map((t, i) => `
+    <label class="flex items-center gap-3 rounded-xl border p-3 cursor-pointer ${S.check[i] ? 'bg-green-50 border-green-300' : 'bg-white border-stone-200'}">
+      <input type="checkbox" data-i="${i}" ${S.check[i] ? 'checked' : ''} class="w-6 h-6 accent-green-600">
+      <span class="${S.check[i] ? 'line-through text-stone-400' : 'font-semibold'}">${t}</span>
+    </label>`).join('');
+  $('chkList').querySelectorAll('input').forEach(c => c.onchange = () => { S.check[c.dataset.i] = c.checked; save(); renderCheck(); });
+  $('chkCount').textContent = `${CHECK.filter((_, i) => S.check[i]).length}/${CHECK.length}`;
+}
+function renderCutLogs() {
+  $('cutLogs').innerHTML = S.cutLogs.length ? '<h3 class="font-bold pt-2">ประวัติการตัด</h3>' + S.cutLogs.map(l => `
+    <div class="flex items-center gap-2 bg-stone-50 rounded-xl p-3">
+      <div class="flex-1"><p class="font-semibold">${thDate(l.date)} • ${fmt(l.rai, 1)} ไร่</p>
+      <p class="text-sm text-stone-500">ทำครบ ${l.done}/${CHECK.length} ข้อ</p></div>
+      <button class="text-2xl p-1" onclick="delCut(${l.id})">🗑️</button>
+    </div>`).join('') : '';
+}
+function delCut(id) { S.cutLogs = S.cutLogs.filter(l => l.id !== id); save(); renderCutLogs(); }
+$('bSaveCut').onclick = () => {
+  const rai = +$('cutRai').value;
+  if (!(rai > 0)) return toast('กรุณากรอกจำนวนไร่ที่ตัด');
+  S.cutLogs.unshift({ id: uid(), date: todayStr(), rai, done: CHECK.filter((_, i) => S.check[i]).length });
+  S.check = {}; $('cutRai').value = '';
+  save(); renderCheck(); renderCutLogs(); toast('บันทึกกิจกรรมแล้ว ✅');
+};
+
+/* ============ 4) ต้นทุน & โควตา ============ */
+const CATS = [
+  { n: 'ค่าปุ๋ย', i: '🧪', c: '#16a34a' },
+  { n: 'ค่าแรง', i: '👷', c: '#b45309' },
+  { n: 'ค่าขนส่ง', i: '🚚', c: '#0e7490' },
+  { n: 'อื่นๆ', i: '📦', c: '#78716c' }
+];
+let curCat = 'ค่าปุ๋ย';
+function renderCats() {
+  $('catGrid').innerHTML = CATS.map(c => `
+    <button type="button" data-c="${c.n}" class="btn border-2 ${c.n === curCat ? 'text-white' : 'bg-white text-stone-700 border-stone-200'}"
+      style="${c.n === curCat ? `background:${c.c};border-color:${c.c}` : ''}">${c.i} ${c.n}</button>`).join('');
+  $('catGrid').querySelectorAll('button').forEach(b => b.onclick = () => { curCat = b.dataset.c; renderCats(); });
+}
+$('bAddCost').onclick = () => {
+  const amt = +$('cAmt').value;
+  if (!(amt > 0)) return toast('กรุณากรอกจำนวนเงิน');
+  S.costs.unshift({ id: uid(), date: $('cDate').value || todayStr(), cat: curCat, amt, note: $('cNote').value.trim() });
+  $('cAmt').value = ''; $('cNote').value = '';
+  save(); renderCosts(); toast('บันทึกค่าใช้จ่ายแล้ว ✅');
+};
+function delCost(id) { if (!confirm('ลบรายการนี้?')) return; S.costs = S.costs.filter(c => c.id !== id); save(); renderCosts(); }
+
+function renderCosts() {
+  const total = S.costs.reduce((a, c) => a + c.amt, 0);
+  const rai = totalRai();
+  const done = S.deliveries.reduce((a, d) => a + d.tons, 0);
+  const rev = done * (S.quota.price || 0);
+  $('sTotal').textContent = baht(total);
+  $('sPerRai').textContent = rai > 0 ? baht(total / rai) : '—';
+  $('sRev').textContent = baht(rev);
+  const profit = rev - total;
+  $('sProfit').textContent = (profit < 0 ? '-' : '') + baht(Math.abs(profit));
+  $('sProfit').className = 'text-xl font-extrabold ' + (profit >= 0 ? 'text-green-700' : 'text-red-600');
+  $('sProfitBox').className = 'rounded-xl p-3 ' + (profit >= 0 ? 'bg-green-50' : 'bg-red-50');
+
+  $('costBars').innerHTML = CATS.map(c => {
+    const s = S.costs.filter(x => x.cat === c.n).reduce((a, x) => a + x.amt, 0);
+    const pct = total ? s / total * 100 : 0;
+    return `<div><div class="flex justify-between text-sm font-semibold mb-1"><span>${c.i} ${c.n}</span><span>${baht(s)} (${Math.round(pct)}%)</span></div>
+      <div class="h-4 bg-stone-100 rounded-full overflow-hidden"><div class="h-4 rounded-full transition-all" style="width:${pct}%;background:${c.c}"></div></div></div>`;
+  }).join('');
+
+  $('costList').innerHTML = S.costs.length ? S.costs.slice(0, 20).map(c => {
+    const cat = CATS.find(x => x.n === c.cat) || CATS[3];
+    return `<div class="flex items-center gap-2 rounded-xl p-3 bg-stone-50 border-l-4" style="border-color:${cat.c}">
+      <div class="flex-1"><p class="font-bold">${cat.i} ${c.cat} <span class="text-amber-800">${baht(c.amt)}</span></p>
+      <p class="text-xs text-stone-500">${thDate(c.date)}${c.note ? ' • ' + esc(c.note) : ''}</p></div>
+      <button class="text-2xl p-1" onclick="delCost(${c.id})">🗑️</button></div>`;
+  }).join('') : '<p class="text-stone-400 text-center py-3">ยังไม่มีรายการ</p>';
+  renderQuota();
+}
+
+function renderQuota() {
+  const done = S.deliveries.reduce((a, d) => a + d.tons, 0);
+  const target = S.quota.target || 0;
+  const pct = target > 0 ? Math.min(100, done / target * 100) : 0;
+  $('ring').style.strokeDashoffset = 326.7 * (1 - pct / 100);
+  $('ringTxt').textContent = Math.round(pct) + '%';
+  $('qDone').textContent = fmt(done, 2);
+  $('qTargetTxt').textContent = fmt(target, 0);
+  const remain = target - done;
+  $('qRemain').textContent = remain > 0 ? `เหลืออีก ${fmt(remain, 2)} ตัน` : `🎉 ครบโควตาแล้ว (เกิน ${fmt(-remain, 2)} ตัน)`;
+  $('delList').innerHTML = S.deliveries.map(d => `
+    <div class="flex items-center gap-2 bg-green-50 rounded-xl p-3">
+      <div class="flex-1"><p class="font-bold">🚛 ${fmt(d.tons, 2)} ตัน</p>
+      <p class="text-xs text-stone-500">${thDate(d.date)}${d.ticket ? ' • ใบชั่ง ' + esc(d.ticket) : ''}</p></div>
+      <button class="text-2xl p-1" onclick="delDel(${d.id})">🗑️</button></div>`).join('');
+}
+$('qTarget').oninput = () => { S.quota.target = +$('qTarget').value || 0; save(); renderCosts(); };
+$('qPrice').oninput = () => { S.quota.price = +$('qPrice').value || 0; save(); renderCosts(); };
+$('bAddDel').onclick = () => {
+  const tons = +$('dTons').value;
+  if (!(tons > 0)) return toast('กรุณากรอกน้ำหนัก (ตัน)');
+  S.deliveries.unshift({ id: uid(), date: $('dDate').value || todayStr(), tons, ticket: $('dTicket').value.trim() });
+  $('dTons').value = ''; $('dTicket').value = '';
+  save(); renderCosts(); toast('บันทึกการส่งอ้อยแล้ว ✅');
+};
+function delDel(id) { if (!confirm('ลบรายการนี้?')) return; S.deliveries = S.deliveries.filter(d => d.id !== id); save(); renderCosts(); }
+
+/* ============ เริ่มต้น ============ */
+$('cDate').value = todayStr(); $('dDate').value = todayStr();
+$('qTarget').value = S.quota.target; $('qPrice').value = S.quota.price;
+drawSaved(); renderMapLists(); refreshPlotSelect(); calcFert();
+renderCheck(); renderCutLogs(); renderCats(); renderCosts();
+if (S.plots.length) map.fitBounds(savedGroup.getBounds(), { padding: [30, 30] });
+else locate(true);
+loadWeather();
+showTab('map');
+</script>
+</body>
+</html>
